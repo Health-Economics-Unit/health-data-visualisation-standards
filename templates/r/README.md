@@ -13,7 +13,10 @@ This repository provides usage guidance and example plots for common analytical 
 
 ```r
 install.packages("remotes")
-remotes::install_github("HealthEconomicsUnit/heutools")
+remotes::install_github(
+  "Health-Economics-Unit/heutools",
+  dependencies = TRUE
+)
 ```
 
 ### 2) Use the theme and palettes in plots
