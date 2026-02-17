@@ -1,0 +1,926 @@
+---
+title: "Health Economics Unit — R Visualisation Example Gallery"
+output: github_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(heutools)
+
+set.seed(42)
+```
+
+## Overview
+
+This gallery demonstrates standard visualisations aligned to the Health Economics Unit visualisation principles using:
+
+- `theme_heu()`
+- `scale_colour_heu()`
+- `scale_fill_heu()`
+- `get_heu_palette()`
+
+All examples use simulated or built-in datasets.
+
+---
+
+## 1. Time Series (Trend Over Time)
+
+**Use for:**
+
+- Admission rates  
+- Referral volumes  
+- Waiting times  
+- Mortality trends  
+- Demand and capacity modelling  
+- Forecast outputs and scenario analysis  
+
+Time series visualisations are used to communicate trends over time and support forward-looking decision-making.
+
+This example demonstrates:
+
+- Clear separation of observed and forecast data  
+- A visible forecast boundary  
+- 95% prediction intervals for uncertainty  
+- A decision-focused title rather than a descriptive label  
+
+Where forecasts are presented, uncertainty should be shown and clearly explained.  
+Observed and modelled data should be visually distinguishable.  
+
+```{r}
+# Gallery-standard forecast chart (HEU-aligned)
+
+p_forecast <- ggplot(df, aes(x = date, y = value)) +
+  geom_ribbon(
+    data = df %>% filter(type == "Forecast"),
+    aes(ymin = lower, ymax = upper),
+    fill = cols[["LightBlue"]],
+    alpha = 0.12,
+    colour = NA
+  ) +
+  geom_line(aes(colour = type, linetype = type), linewidth = 1.1) +
+  geom_vline(
+    xintercept = cutoff_date,
+    linetype = "dotted",
+    colour = cols[["MidGrey"]]
+  ) +
+  labs(
+    title = "Projected referrals continue upward trend",
+    subtitle = "Observed data to Jan 2024. Shaded area shows 95% prediction interval (forecast only).",
+    x = NULL,
+    y = "Monthly referrals"
+  ) +
+  scale_colour_heu() +
+  scale_linetype_manual(values = c("Observed" = "solid", "Forecast" = "dashed")) +
+  theme_heu(font = "sans") +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+) 
+
+p_forecast
+ggsave(
+  filename = "outputs/forecast_time_series.png",
+  plot = p_forecast,
+  width = 10,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+## 2. Variation Across Organisations (Funnel Plot)
+
+**Use for:**
+
+- Benchmarking provider or system performance  
+- Identifying statistically significant variation  
+- Monitoring quality or outcome indicators  
+- Supporting improvement conversations (not league tables)  
+
+Funnel plots are preferred when comparing organisations with different activity volumes.  
+They account for expected statistical variation, reducing the risk of over-interpreting random fluctuation.
+
+This example shows:
+
+- The overall mean outcome rate (solid horizontal line)  
+- 95% control limits (dashed)  
+- 99.8% control limits (solid)  
+- Organisations classified by whether they fall within expected variation  
+
+Control limits narrow as activity increases, reflecting reduced statistical uncertainty for higher-volume systems.
+```{r}
+library(ggplot2)
+library(dplyr)
+library(heutools)
+
+set.seed(42)
+cols <- heutools::get_heu_colours()
+
+# --- Simulated provider/system data (safe for gallery) ---
+n <- 45
+df_funnel <- tibble::tibble(
+  organisation = paste("System", sprintf("%02d", 1:n)),
+  denominator = round(runif(n, 100, 5000)),
+  # baseline mean rate around 10%
+  rate = pmin(pmax(rnorm(n, 0.10, 0.018), 0.01), 0.25)
+)
+
+# Overall mean rate (benchmark)
+pbar <- weighted.mean(df_funnel$rate, w = df_funnel$denominator)
+
+# Control limits for proportions (approx. binomial)
+# 95% (~1.96 SD) and 99.8% (~3 SD)
+df_funnel <- df_funnel %>%
+  mutate(
+    se = sqrt(pbar * (1 - pbar) / denominator),
+    upper_95 = pbar + 1.96 * se,
+    lower_95 = pbar - 1.96 * se,
+    upper_998 = pbar + 3.00 * se,
+    lower_998 = pbar - 3.00 * se
+  ) %>%
+  mutate(
+    # clamp to [0,1] to avoid impossible limits at small n
+    lower_95  = pmax(lower_95,  0),
+    lower_998 = pmax(lower_998, 0),
+    upper_95  = pmin(upper_95,  1),
+    upper_998 = pmin(upper_998, 1),
+    signal = case_when(
+      rate > upper_998 | rate < lower_998 ~ "Outside 99.8% limits",
+      rate > upper_95  | rate < lower_95  ~ "Outside 95% limits",
+      TRUE                               ~ "Within expected variation"
+    )
+  )
+
+# Smooth curves for limits
+x_seq <- seq(min(df_funnel$denominator), max(df_funnel$denominator), length.out = 400)
+limits <- tibble::tibble(
+  denominator = x_seq,
+  se = sqrt(pbar * (1 - pbar) / denominator),
+  upper_95  = pmin(pbar + 1.96 * se, 1),
+  lower_95  = pmax(pbar - 1.96 * se, 0),
+  upper_998 = pmin(pbar + 3.00 * se, 1),
+  lower_998 = pmax(pbar - 3.00 * se, 0)
+)
+
+# Order signal for consistent legend
+df_funnel$signal <- factor(
+  df_funnel$signal,
+  levels = c("Within expected variation", "Outside 95% limits", "Outside 99.8% limits")
+)
+
+# --- Plot ---
+p_funnel <- ggplot(df_funnel, aes(x = denominator, y = rate)) +
+  # Control limit curves
+  geom_line(data = limits, aes(y = upper_95),  linewidth = 0.9, linetype = "dashed", colour = cols[["MidGrey"]]) +
+  geom_line(data = limits, aes(y = lower_95),  linewidth = 0.9, linetype = "dashed", colour = cols[["MidGrey"]]) +
+  geom_line(data = limits, aes(y = upper_998), linewidth = 0.9, linetype = "solid",  colour = cols[["MidGrey"]]) +
+  geom_line(data = limits, aes(y = lower_998), linewidth = 0.9, linetype = "solid",  colour = cols[["MidGrey"]]) +
+
+  # Mean line
+  geom_hline(yintercept = pbar, linewidth = 1.0, colour = cols[["DarkBlue"]]) +
+
+  # Points
+  geom_point(aes(colour = signal), size = 2.6) +
+
+  # Labels and scales
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Most systems fall within expected variation",
+    subtitle = "Funnel plot with 95% (dashed) and 99.8% (solid) control limits. Illustrative data.",
+    x = "Annual activity (denominator)",
+    y = "Outcome rate (%)",
+    colour = NULL
+  ) +
+
+  # Use HEU discrete colours for signals (no red/green reliance)
+  scale_colour_manual(
+    values = c(
+      "Within expected variation" = cols[["AquaGreen"]],
+      "Outside 95% limits"        = cols[["LightBlue"]],
+      "Outside 99.8% limits"      = cols[["DarkBlue"]]
+    )
+  ) +
+
+  theme_heu(font = "sans") +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+) 
+
+p_funnel
+
+dir.create("outputs", showWarnings = FALSE)
+
+ggsave(
+  filename = "outputs/funnel_plot_variation.png",
+  plot = p_funnel,
+  width = 10,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+## 3. Survival Analysis (Kaplan–Meier Curve)
+
+**Use for:**
+
+- Time to diagnosis  
+- Time to treatment initiation  
+- Overall survival  
+- Progression-free survival  
+- Pathway evaluation  
+
+Kaplan–Meier curves are used to visualise time-to-event outcomes while accounting for censoring.
+
+This example demonstrates:
+
+- Clear comparison between intervention and comparator groups  
+- Confidence intervals for uncertainty  
+- A number-at-risk table to support interpretation  
+- Distinction between groups using both colour and line type  
+
+Survival plots should clearly define time units and make censoring assumptions transparent.
+
+```{r}
+library(survival)
+library(survminer)
+library(dplyr)
+library(heutools)
+
+set.seed(42)
+cols <- heutools::get_heu_colours()
+
+# --- Simulated survival data (safe for gallery) ---
+n <- 400
+df_surv <- tibble(
+  group = rep(c("Comparator", "Intervention"), each = n / 2),
+  time_years = c(
+    rexp(n / 2, rate = 0.05),  # Comparator: higher hazard
+    rexp(n / 2, rate = 0.03)   # Intervention: lower hazard
+  ),
+  status = rbinom(n, 1, 0.8)   # 1 = event, 0 = censored
+) %>%
+  mutate(
+    time_months = time_years * 12
+  )
+
+# --- Administrative censoring at 120 months (prevents end-of-window cliff) ---
+max_followup <- 120
+df_surv <- df_surv %>%
+  mutate(
+    status = ifelse(time_months > max_followup, 0, status),
+    time_months = pmin(time_months, max_followup)
+  )
+
+fit <- survfit(Surv(time_months, status) ~ group, data = df_surv)
+
+# --- Plot ---
+p_surv <- ggsurvplot(
+  fit,
+  data = df_surv,
+
+  # Uncertainty + censoring
+  conf.int = TRUE,
+  conf.int.alpha = 0.15,
+  censor.shape = 3,
+  censor.size = 2.5,
+
+  # Risk table (clean)
+  risk.table = TRUE,
+  risk.table.height = 0.22,
+  risk.table.title = "Number at risk",
+  risk.table.y.text = FALSE,
+  tables.theme = survminer::theme_cleantable(),
+
+  # Axes + time window
+  xlim = c(0, max_followup),
+  break.time.by = 12,
+  xlab = "Time (months)",
+  ylab = "Survival probability",
+
+  # Legend (avoid 'strata' label cleanly)
+  legend.title = NULL,
+  legend.labs = c("Comparator", "Intervention"),
+
+  # Accessibility: colour + linetype
+  palette = c(cols[["DarkBlue"]], cols[["AquaGreen"]]),
+  linetype = c("dashed", "solid"),
+
+  # HEU styling + legend placement
+  ggtheme = theme_heu(font = "sans") +
+    theme(
+      legend.position = "top",
+      legend.title = element_blank(),
+      plot.title.position = "plot",
+      plot.title = element_text(hjust = 0),
+      plot.subtitle = element_text(hjust = 0)
+  ) ,
+
+  # Executive framing
+  title = "Intervention associated with improved survival",
+  subtitle = "Kaplan–Meier curve with 95% confidence intervals. Illustrative data."
+)
+
+p_surv
+
+# --- Save (reliable for survminer objects) ---
+dir.create("outputs", showWarnings = FALSE)
+png("outputs/survival_km_risktable.png", width = 10, height = 7, units = "in", res = 300)
+print(p_surv)
+
+dev.off()
+```
+
+## 4. Comparative Estimates (Forest Plot)
+
+**Use for:**
+
+- Treatment effects (e.g. hazard ratios, odds ratios, risk ratios)  
+- Subgroup analysis  
+- Service comparisons with uncertainty  
+- Evidence synthesis summaries  
+
+Forest plots show point estimates alongside confidence intervals, making uncertainty explicit and interpretation straightforward.
+
+This example demonstrates:
+
+- Direct labelling and clear units  
+- 95% confidence intervals  
+- A reference line (no effect)  
+- Ordering by effect size to improve interpretability  
+
+Where appropriate, note whether estimates are adjusted, and define the reference category.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(heutools)
+
+cols <- heutools::get_heu_colours()
+
+# --- Simulated effect estimates (hazard ratios) ---
+df_forest <- tibble::tibble(
+  subgroup = c(
+    "Overall",
+    "Age < 60",
+    "Age 60–74",
+    "Age 75+",
+    "Female",
+    "Male",
+    "Most deprived quintile",
+    "Least deprived quintile",
+    "Emergency diagnosis",
+    "Non-emergency diagnosis"
+  ),
+  hr = c(
+    0.82,
+    0.78,
+    0.83,
+    0.90,
+    0.80,
+    0.85,
+    0.88,
+    0.76,
+    0.92,
+    0.79
+  )
+) %>%
+  mutate(
+    se = runif(n(), 0.06, 0.14),
+    lower = pmax(hr * exp(-1.96 * se), 0.05),
+    upper = hr * exp(1.96 * se),
+    is_overall = subgroup == "Overall",
+    label = sprintf("%.2f (%.2f–%.2f)", hr, lower, upper)
+  )
+
+# --- Order: Overall first, then the rest (no unintended sorting) ---
+df_forest$subgroup <- factor(df_forest$subgroup, levels = rev(df_forest$subgroup))
+
+# --- Choose x-limits with breathing room for right-hand labels ---
+x_min <- 0.5
+x_max <- max(df_forest$upper) * 1.25
+label_x <- max(df_forest$upper) * 1.05
+
+p_forest <- ggplot(df_forest, aes(x = hr, y = subgroup)) +
+  # Reference line (no effect)
+  geom_vline(xintercept = 1, linetype = "dotted", colour = cols[["MidGrey"]]) +
+
+  # CI lines (softer)
+  geom_errorbarh(
+    aes(xmin = lower, xmax = upper),
+    height = 0.2,
+    linewidth = 0.8,
+    colour = cols[["MidGrey"]]
+  ) +
+
+  # Points (Overall more prominent)
+  geom_point(
+    aes(size = is_overall),
+    colour = cols[["DarkBlue"]]
+  ) +
+  scale_size_manual(values = c(`TRUE` = 3.4, `FALSE` = 2.6), guide = "none") +
+
+  # Right-hand CI labels (exec-friendly, no legend needed)
+  geom_text(
+    aes(x = label_x, label = label),
+    hjust = 0,
+    size = 3.4,
+    colour = cols[["MidGrey"]]
+  ) +
+
+  # HR scale (log)
+  scale_x_log10(
+    limits = c(x_min, x_max),
+    breaks = c(0.5, 0.75, 1, 1.25, 1.5),
+    labels = label_number(accuracy = 0.01)
+  ) +
+
+  labs(
+    title = "Intervention associated with lower hazard across key subgroups",
+    subtitle = "Hazard ratios (HR) with 95% confidence intervals. HR < 1 favours intervention. Illustrative data.",
+    x = "Hazard ratio (log scale)",
+    y = NULL
+  ) +
+
+  theme_heu(font = "sans") +
+  theme(
+  plot.margin = margin(t = 15, r = 60, b = 15, l = 15),
+  plot.title.position = "plot",
+  plot.title = element_text(hjust = 0),
+  plot.subtitle = element_text(hjust = 0)
+) +
+  coord_cartesian(clip = "off")
+
+p_forest
+
+# --- Save ---
+dir.create("outputs", showWarnings = FALSE)
+
+ggsave(
+  filename = "outputs/forest_plot_hr_flagship.png",
+  plot = p_forest,
+  width = 11,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+
+```
+
+## 5. Cost-Effectiveness Plane (Probabilistic Sensitivity Analysis)
+
+**Use for:**
+
+- Incremental cost-effectiveness analysis  
+- Probabilistic sensitivity analysis (PSA)  
+- Decision uncertainty visualisation  
+- Economic model outputs  
+
+Cost-effectiveness planes plot incremental costs against incremental QALYs.
+
+This example demonstrates:
+
+- PSA simulations displayed transparently  
+- Clear reference axes (no effect lines)  
+- A willingness-to-pay (WTP) threshold  
+- Interpretation of quadrants  
+
+Points in the south-east quadrant represent interventions that are more effective and less costly.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(heutools)
+library(stringr)
+
+set.seed(42)
+cols <- heutools::get_heu_colours()
+
+# --- Simulated PSA output (illustrative) ---
+n_sim <- 3000
+df_ce <- tibble(
+  delta_qaly = rnorm(n_sim, mean = 0.04, sd = 0.02),
+  delta_cost = rnorm(n_sim, mean = 1500, sd = 1200)
+)
+
+wtp <- 20000  # £ per QALY
+
+# Probability cost-effective at the threshold: deltaC <= WTP * deltaE
+p_ce <- mean(df_ce$delta_cost <= wtp * df_ce$delta_qaly)
+p_ce_pct <- percent(p_ce, accuracy = 1)
+
+# Expand plot limits slightly for breathing room
+x_lim <- range(df_ce$delta_qaly)
+y_lim <- range(df_ce$delta_cost)
+x_pad <- diff(x_lim) * 0.05
+y_pad <- diff(y_lim) * 0.05
+
+# Pre-build title text (cleaner)
+title_txt <- str_wrap(
+  paste0(
+    "At a £", format(wtp, big.mark = ","),
+    " per QALY threshold, ", p_ce_pct,
+    " of simulations are cost-effective"
+  ),
+  width = 60
+)
+
+p_ceplane <- ggplot(df_ce, aes(x = delta_qaly, y = delta_cost)) +
+  # PSA cloud
+  geom_point(alpha = 0.22, size = 1.1, colour = cols[["DarkBlue"]]) +
+
+  # Reference lines (no difference)
+  geom_hline(yintercept = 0, colour = cols[["MidGrey"]], linewidth = 0.8, alpha = 0.8) +
+  geom_vline(xintercept = 0, colour = cols[["MidGrey"]], linewidth = 0.8, alpha = 0.8) +
+
+  # WTP threshold line
+  geom_abline(
+    intercept = 0,
+    slope = wtp,
+    linetype = "dashed",
+    colour = cols[["AquaGreen"]],
+    linewidth = 0.8,
+    alpha = 0.8
+  ) +
+
+  # Axes formatting
+  scale_y_continuous(labels = label_dollar(prefix = "£")) +
+  scale_x_continuous(labels = label_number(accuracy = 0.01)) +
+
+  # Labels
+  labs(
+    title = title_txt,
+    subtitle = "Cost-effectiveness plane showing probabilistic sensitivity analysis (PSA). Illustrative data.",
+    x = "Incremental QALYs",
+    y = "Incremental cost (£)"
+  ) +
+
+  # HEU styling
+  theme_heu(font = "sans", titlesize = 18) +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+  ) +
+
+  coord_cartesian(
+    xlim = c(x_lim[1] - x_pad, x_lim[2] + x_pad),
+    ylim = c(y_lim[1] - y_pad, y_lim[2] + y_pad)
+  ) +
+
+  annotate(
+    "text",
+    x = max(df_ce$delta_qaly),
+    y = wtp * max(df_ce$delta_qaly),
+    label = "£20,000 per QALY",
+    hjust = 1,
+    vjust = -0.3,
+    size = 3,
+    colour = cols[["AquaGreen"]]
+  )
+
+p_ceplane
+
+# Extra breathing room for saved output (prevents clipping)
+p_ceplane <- p_ceplane +
+  theme(plot.margin = margin(t = 20, r = 15, b = 15, l = 15))
+
+ggsave(
+  filename = "outputs/cost_effectiveness_plane_flagship.png",
+  plot = p_ceplane,
+  width = 8,
+  height = 6.5,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+## 6. Cost-Effectiveness Acceptability Curve (CEAC)
+
+**Use for:**
+
+- Communicating decision uncertainty across willingness-to-pay (WTP) thresholds  
+- NICE-style threshold-based interpretation  
+- Summarising PSA results for decision-makers  
+
+A CEAC shows the probability an intervention is cost-effective across a range of WTP thresholds.
+
+This example demonstrates:
+
+- Transparent use of PSA simulations  
+- Clear axis units and threshold range  
+- Decision-focused interpretation (probability of cost-effectiveness)  
+
+CEACs should be presented alongside the cost-effectiveness plane where possible.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(heutools)
+library(stringr)
+
+cols <- heutools::get_heu_colours()
+
+# Ensure df_ce exists with columns: delta_qaly, delta_cost
+# df_ce <- ... (from CE plane example)
+
+# Threshold grid (NICE commonly references £20k–£30k, but show a wider view)
+wtp_grid <- seq(0, 50000, by = 500)
+
+# Probability cost-effective at each threshold:
+# NMB = (WTP * ΔE) - ΔC  -> cost-effective if NMB > 0
+ceac <- tibble(wtp = wtp_grid) %>%
+  rowwise() %>%
+  mutate(
+    p_ce = mean((wtp * df_ce$delta_qaly - df_ce$delta_cost) > 0)
+  ) %>%
+  ungroup()
+
+# Pull key thresholds for annotation
+p_20k <- ceac$p_ce[which.min(abs(ceac$wtp - 20000))]
+p_30k <- ceac$p_ce[which.min(abs(ceac$wtp - 30000))]
+
+title_txt <- str_wrap(
+  "Probability of cost-effectiveness increases with willingness-to-pay",
+  width = 65
+)
+
+subtitle_txt <- paste0(
+  "Based on PSA simulations. At £20,000: ",
+  percent(p_20k, accuracy = 1),
+  " | At £30,000: ",
+  percent(p_30k, accuracy = 1),
+  " (illustrative data)."
+)
+
+p_ceac <- ggplot(ceac, aes(x = wtp, y = p_ce)) +
+  geom_line(linewidth = 1.1, colour = cols[["DarkBlue"]]) +
+
+  # NICE reference thresholds (subtle)
+  geom_vline(xintercept = 20000, linetype = "dotted", colour = cols[["MidGrey"]], alpha = 0.8) +
+  geom_vline(xintercept = 30000, linetype = "dotted", colour = cols[["MidGrey"]], alpha = 0.8) +
+
+  scale_x_continuous(
+    labels = label_dollar(prefix = "£", big.mark = ","),
+    breaks = seq(0, 50000, by = 10000),
+    expand = expansion(mult = c(0.01, 0.02))
+  ) +
+  scale_y_continuous(
+    labels = label_percent(accuracy = 1),
+    limits = c(0, 1),
+    breaks = seq(0, 1, by = 0.2),
+    expand = expansion(mult = c(0.01, 0.02))
+  ) +
+
+  labs(
+    title = title_txt,
+    subtitle = subtitle_txt,
+    x = "Willingness-to-pay threshold (£ per QALY)",
+    y = "Probability cost-effective"
+  ) +
+
+  theme_heu(font = "sans", titlesize = 18) +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+  )
+
+p_ceac
+
+# --- Save ---
+dir.create("outputs", showWarnings = FALSE)
+
+ggsave(
+  filename = "outputs/ceac_flagship.png",
+  plot = p_ceac,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+## 7. Ranked horizontal bar chart
+
+**Use for:**
+
+- Comparing organisations, conditions or categories  
+- Showing top / bottom performers  
+- Communicating magnitude clearly in slide decks  
+- Ranking cost drivers or activity volumes  
+
+This template demonstrates:
+
+- Horizontal orientation for readability  
+- Clear ranking (largest at top)  
+- Direct value labels (avoids reliance on legends)  
+- Explicit units  
+- Minimal visual clutter  
+
+This should be the default bar chart style used across HEU outputs.
+
+```{r}
+# HEU gallery: Ranked horizontal bar chart with direct labels (default)
+# - Horizontal for readability
+# - Proper ranking (largest at top)
+# - Direct labels with units
+# - Wrapped title + wrapped category labels
+# - Extra x-axis headroom so labels never clip
+
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(heutools)
+library(stringr)
+
+set.seed(123)
+cols <- heutools::get_heu_colours()
+
+# --- Simulated example data (illustrative) ---
+df_bar <- tibble(
+  category = c(
+    "Cardiology",
+    "Respiratory medicine",
+    "Oncology",
+    "General surgery",
+    "Orthopaedics",
+    "Neurology",
+    "Gastroenterology",
+    "Urology"
+  ),
+  value = round(runif(8, 50, 220), 0)
+)
+
+# Wrap long category labels (do this BEFORE factor levels)
+df_bar <- df_bar %>%
+  mutate(category_wrapped = str_wrap(category, width = 25)) %>%
+  # Rank so the largest appears at the TOP (ascending order for horizontal bars)
+  arrange(value) %>%
+  mutate(category_wrapped = factor(category_wrapped, levels = category_wrapped))
+
+title_txt <- str_wrap(
+  "Orthopaedics and oncology account for the highest annual activity volumes",
+  width = 60
+)
+
+p_bar <- ggplot(df_bar, aes(x = value, y = category_wrapped)) +
+  geom_col(fill = cols[["DarkBlue"]], width = 0.65) +
+
+  # Direct value labels
+  geom_text(
+    aes(label = comma(value)),
+    hjust = -0.1,
+    size = 3.4,
+    colour = cols[["MidGrey"]]
+  ) +
+
+  scale_x_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0, 0.14)) # headroom for labels
+  ) +
+
+  labs(
+    title = title_txt,
+    subtitle = "Annual activity volumes (illustrative data).",
+    x = "Annual activity (number of cases)",
+    y = NULL
+  ) +
+
+  theme_heu(font = "sans", titlesize = 18) +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+  )
+
+p_bar
+
+# --- Save ---
+dir.create("outputs", showWarnings = FALSE)
+
+ggsave(
+  filename = "outputs/ranked_bar_chart_flagship.png",
+  plot = p_bar,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+## 8. Ranked horizontal bar chart with benchmark
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(heutools)
+library(stringr)
+
+set.seed(456)
+cols <- heutools::get_heu_colours()
+
+# --- Simulated example data (illustrative) ---
+df_div <- tibble(
+  organisation = c(
+    "System A", "System B", "System C", "System D", "System E",
+    "System F", "System G", "System H", "System I", "System J"
+  ),
+  rate = round(runif(10, 7.5, 12.8), 1)  # e.g., outcome rate (%)
+)
+
+benchmark <- 10.0  # e.g., national average (%)
+
+df_div <- df_div %>%
+  mutate(
+    diff_pp = rate - benchmark,                       # difference in percentage points
+    direction = if_else(diff_pp >= 0, "Above benchmark", "Below benchmark"),
+    organisation_wrapped = str_wrap(organisation, width = 18)
+  ) %>%
+  arrange(diff_pp) %>%                                # most below at bottom, most above at top
+  mutate(organisation_wrapped = factor(organisation_wrapped, levels = organisation_wrapped))
+
+title_txt <- str_wrap(
+  "Variation in outcome rate relative to the benchmark",
+  width = 65
+)
+
+subtitle_txt <- paste0(
+  "Bars show percentage point difference from benchmark (", benchmark, "%). Illustrative data."
+)
+
+p_div <- ggplot(df_div, aes(x = diff_pp, y = organisation_wrapped)) +
+
+  # Zero line (benchmark)
+  geom_vline(xintercept = 0, colour = cols[["MidGrey"]], linewidth = 0.8, alpha = 0.9) +
+
+  # Diverging bars (two-colour, no red/green)
+  geom_col(
+    aes(fill = direction),
+    width = 0.65
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "Above benchmark" = cols[["DarkBlue"]],
+      "Below benchmark" = cols[["AquaGreen"]]
+    ),
+    guide = "none"
+  ) +
+
+  # Direct labels (percentage points)
+  geom_text(
+    aes(
+      label = paste0(if_else(diff_pp > 0, "+", ""), sprintf("%.1f", diff_pp), " pp"),
+      hjust = if_else(diff_pp >= 0, -0.1, 1.1)
+    ),
+    size = 3.4,
+    colour = cols[["MidGrey"]]
+  ) +
+
+  scale_x_continuous(
+    labels = function(x) paste0(x, " pp"),
+    expand = expansion(mult = c(0.12, 0.12))
+  ) +
+
+  labs(
+    title = title_txt,
+    subtitle = subtitle_txt,
+    x = "Difference from benchmark (percentage points)",
+    y = NULL
+  ) +
+
+  theme_heu(font = "sans", titlesize = 18) +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0),
+    plot.subtitle = element_text(hjust = 0)
+  )
+
+p_div
+
+# --- Save ---
+dir.create("outputs", showWarnings = FALSE)
+
+ggsave(
+  filename = "outputs/diverging_bar_chart_flagship.png",
+  plot = p_div,
+  width = 8,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+```
