@@ -51,16 +51,7 @@ Refer to the `heutools` repository for the definitive API and documentation.
 See:
 
 - `example_gallery.Rmd` — runnable examples that generate standard plots  
-- `outputs/` (optional) — rendered example images for quick reference  
-
-The gallery focuses on chart types used commonly in health economics and NHS analytics:
-
-- Time series (with annotations)  
-- Group comparisons (dot plots)  
-- Distributions (histograms/boxplots)  
-- Funnel plots / variation charts (where relevant)  
-- Survival curves (Kaplan–Meier)  
-- Cost-effectiveness plane and CEAC (if applicable)  
+- `outputs/` — rendered example images for quick reference  
 
 ---
 
