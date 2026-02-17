@@ -17,3 +17,21 @@ It includes written guidance and ready-to-use templates for **Python (matplotlib
 tbc
 ### R
 tbc
+
+## Principles (short version)
+
+- Prioritise **clarity and interpretability** over decoration.
+- Use **direct labelling** and include **units and time windows**.
+- Where appropriate, show **uncertainty** (CI, IQR, PSA, scenario ranges).
+- Ensure outputs are **accessible** (colour-blind safe, readable font sizes).
+- Use consistent formatting across charts in a report or slide deck.
+
+---
+
+## Contributing
+
+We welcome improvements from across the team. Please open an issue or pull request (PR) with:
+
+- The proposed change  
+- A short rationale  
+- Before/after examples where possible
